@@ -14,8 +14,6 @@ __pycache__/
 
 # Node
 node_modules/
-dist/
-frontend/dist/
 .eslintcache
 
 # IDEs
