@@ -81,28 +81,42 @@ class SessionManager:
         if not self.page: return
         logger.info(f"Navegando para: {config.EVO_URL}")
         try:
-            await self.page.goto(config.EVO_URL, timeout=90000, wait_until="domcontentloaded")
-            await asyncio.sleep(8)
+            await self.page.goto(config.EVO_URL, timeout=120000, wait_until="networkidle")
+            await asyncio.sleep(10)
             
-            # Tenta preencher login se houver campos
-            try:
-                user_field = self.page.locator('input[type="text"], input[placeholder*="CPF"], input[placeholder*="Usuário"]').first
-                pass_field = self.page.locator('input[type="password"]').first
-                btn = self.page.locator('button:has-text("Entrar"), button:has-text("Login"), .login-button').first
+            # Tenta encontrar campos de login na página principal e em todos os IFrames
+            found_login = False
+            all_frames = self.page.frames
+            logger.info(f"Verificando login em {len(all_frames)} frames...")
 
-                if await user_field.is_visible(timeout=5000):
-                    logger.info("Campos de login encontrados. Autenticando...")
-                    await user_field.fill(config.EVO_LOGIN)
-                    await pass_field.fill(config.EVO_PASSWORD)
-                    await btn.click()
-                    logger.info("Login disparado. Aguardando interface do jogo...")
-                    await asyncio.sleep(15)
+            for frame in all_frames:
+                try:
+                    user_field = frame.locator('input[type="text"], input[placeholder*="CPF"], input[placeholder*="Usuário"], input[name*="username"]').first
+                    pass_field = frame.locator('input[type="password"]').first
+                    btn = frame.locator('button:has-text("Entrar"), button:has-text("Login"), .login-button, button[type="submit"]').first
+
+                    if await user_field.is_visible(timeout=3000):
+                        logger.info(f"Campos de login encontrados no frame: {frame.name or 'principal'}. Autenticando...")
+                        await user_field.fill(config.EVO_LOGIN)
+                        await pass_field.fill(config.EVO_PASSWORD)
+                        await btn.click()
+                        found_login = True
+                        logger.info("Login disparado. Aguardando 20s para carregamento do jogo...")
+                        await asyncio.sleep(20)
+                        break
+                except:
+                    continue
+
+            if not found_login:
+                logger.info("Nenhum campo de login detectado. Verificando se o jogo já está visível...")
+                # Verifica se existe um canvas ou elemento de jogo para confirmar se já está logado
+                game_element = self.page.locator('canvas, .game-view, .evolution-game-ui').first
+                if await game_element.count() > 0:
+                    logger.info("✅ Jogo detectado! Sessão ativa confirmada.")
                 else:
-                    logger.info("Nenhum campo de login visível. Assumindo que a sessão já existe.")
-            except:
-                logger.info("Busca de campos de login finalizada.")
+                    logger.warning("⚠️ Atenção: Nem login nem jogo foram encontrados. Verifique o storage_state.json ou a URL.")
 
-            logger.info(f"Página Atual: {self.page.url}")
+            logger.info(f"URL Final: {self.page.url}")
             self.update_activity()
         except Exception as e:
             logger.error(f"Erro no fluxo de login: {e}")
