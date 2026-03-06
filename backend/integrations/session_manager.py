@@ -53,10 +53,20 @@ class SessionManager:
                     user_data_dir=self.user_data_dir,
                     headless=is_linux,
                     args=launch_args,
-                    viewport={'width': 1280, 'height': 720},
-                    storage_state=storage_state
+                    viewport={'width': 1280, 'height': 720}
                 )
                 
+                # Se houver um estado universal salvo (JSON), injeta os cookies manualmente
+                if storage_state:
+                    try:
+                        import json
+                        with open(state_path, 'r') as f:
+                            state_data = json.load(f)
+                            await self.context.add_cookies(state_data.get('cookies', []))
+                        logger.info("🍪 Cookies injetados com sucesso via storage_state.json!")
+                    except Exception as e:
+                        logger.error(f"Erro ao injetar cookies: {e}")
+
                 self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
                 
                 await self.page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
