@@ -37,19 +37,30 @@ class GameRunner:
         page.on("websocket", self._on_websocket)
 
     def _on_websocket(self, ws: WebSocket):
-        logger.info(f" [WS DETECTADO] URL: {ws.url[:100]}...")
-        if "/bacbo/player/game/" in ws.url or "bacbo" in ws.url or "egcvi.com" in ws.url:
+        logger.info(f"📡 [WS DETECTADO] {ws.url[:120]}")
+        
+        # Monitora TODOS os frames de todos os sockets para não perder nada
+        ws.on("framereceived", lambda frame: self._handle_frame(frame, ws.url))
+        
+        if "/bacbo/" in ws.url or "bacbo" in ws.url or "egcvi.com" in ws.url or "casinofans" in ws.url:
             self.ws_found = True
-            logger.info(f" [ALVO CONECTADO] {ws.url[:60]}...")
-            ws.on("framereceived", lambda frame: self._handle_frame(frame, "EVO"))
-            ws.on("close", lambda: logger.warning(" [ALVO DESCONECTADO] WebSocket fechado pelo servidor."))
+            logger.info(f"🎯 [ALVO POSSÍVEL] {ws.url[:80]}...")
 
-    def _handle_frame(self, frame_text, source):
+    def _handle_frame(self, frame_text, url_source):
         try:
             if isinstance(frame_text, bytes): return
-            SessionManager.get_instance().update_activity()
-            if len(frame_text) < 30 or "PONG" in frame_text or "metrics.pong" in frame_text: return
+            
+            # Se o frame contém palavras-chave da Evolution, processamos
+            # Isso é o "Farejador por Conteúdo" (mais robusto que por URL)
+            is_evo_data = "roundId" in frame_text or "winner" in frame_text or "playerScore" in frame_text or "bankerScore" in frame_text
+            
+            if not is_evo_data:
+                return
 
+            SessionManager.get_instance().update_activity()
+            if len(frame_text) < 30 or "PONG" in frame_text: return
+
+            # Extração do JSON limpo
             clean_json = frame_text
             match = re.search(r'([\[\{].*)', frame_text)
             if match:
@@ -57,6 +68,11 @@ class GameRunner:
             else: return
 
             data = json.loads(clean_json)
+            
+            # Log de debug para sabermos que estamos recebendo dados reais
+            if "bettingstats" not in frame_text.lower():
+                 logger.info(f"📥 [FRAME RECEBIDO] Conteúdo detectado de: {url_source[:50]}")
+
             self._process_live(data)
 
             def find_candidate(obj):
