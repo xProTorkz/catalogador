@@ -64,10 +64,10 @@ class SessionManager:
                     storage_state=storage_state
                 )
                 
-                self.page = await self.context.new_page()
+                # ESCUTA GLOBAL: Captura WebSockets em qualquer frame/iframe do contexto
+                self.context.on("websocket", lambda ws: logger.info(f"🔥 [WS GLOBAL DETECTADO] {ws.url[:120]}"))
                 
-                # DIAGNÓSTICO DE 10 SEGUNDOS: Escuta global de WebSockets
-                self.page.on("websocket", lambda ws: logger.info(f"📡 [WS DETECTADO NA PÁGINA] {ws.url[:120]}"))
+                self.page = await self.context.new_page()
                 
                 await self.page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
 

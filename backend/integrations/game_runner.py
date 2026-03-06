@@ -28,23 +28,23 @@ class GameRunner:
         self.is_running = True
         logger.info(f"Farejador ativado para: {self.active_game}")
         session = SessionManager.get_instance()
-        while not session.page:
+        # Espera o contexto estar pronto antes de grampear
+        while not session.context:
             await asyncio.sleep(1)
-        await self._setup_listeners(session.page)
+        await self._setup_listeners(session.context)
 
-    async def _setup_listeners(self, page: Page):
-        logger.info("Monitorando conexões da Evolution...")
-        page.on("websocket", self._on_websocket)
+    async def _setup_listeners(self, context):
+        logger.info("Monitorando conexões GLOBAIS do contexto (Frames + Iframes)...")
+        context.on("websocket", self._on_websocket)
 
     def _on_websocket(self, ws: WebSocket):
-        logger.info(f"📡 [WS DETECTADO] {ws.url[:120]}")
-        
-        # Monitora TODOS os frames de todos os sockets para não perder nada
-        ws.on("framereceived", lambda frame: self._handle_frame(frame, ws.url))
-        
-        if "/bacbo/" in ws.url or "bacbo" in ws.url or "egcvi.com" in ws.url or "casinofans" in ws.url:
+        # Log simplificado para não inundar o terminal, mas registrar a detecção
+        if "evolution" in ws.url or "egcvi.com" in ws.url or "bacbo" in ws.url or "casinofans" in ws.url:
             self.ws_found = True
-            logger.info(f"🎯 [ALVO POSSÍVEL] {ws.url[:80]}...")
+            logger.info(f"🎯 [ALVO CONECTADO] {ws.url[:100]}...")
+            ws.on("framereceived", lambda frame: self._handle_frame(frame, ws.url))
+        else:
+            logger.debug(f"📡 [WS OUTRO] {ws.url[:60]}")
 
     def _handle_frame(self, frame_text, url_source):
         try:
