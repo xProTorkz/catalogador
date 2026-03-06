@@ -4,6 +4,9 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
+# Adiciona a raiz do projeto ao path para resolver imports na VPS
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 # MANDATORY: This MUST be the first thing executed
 if sys.platform == 'win32':
     try:
