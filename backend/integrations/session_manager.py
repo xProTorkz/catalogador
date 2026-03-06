@@ -28,7 +28,7 @@ class SessionManager:
 
     async def start(self):
         if self.is_running: return
-        logger.info(f"Iniciando Browser. Perfil: {self.user_data_dir}")
+        logger.info(f"Iniciando Browser Profissional. Perfil: {self.user_data_dir}")
         os.makedirs(self.user_data_dir, exist_ok=True)
 
         async with self.lock:
@@ -37,38 +37,34 @@ class SessionManager:
                 is_linux = sys.platform != 'win32'
                 
                 state_path = os.path.join(self.user_data_dir, "storage_state.json")
+                # Se não existir o JSON, ele inicia limpo
                 storage_state = state_path if os.path.exists(state_path) else None
                 
                 if storage_state:
-                    logger.info("📦 Estado de login encontrado! Carregando sessão universal...")
+                    logger.info("📦 Estado de login (storage_state.json) encontrado! Carregando sessão...")
 
                 launch_args = [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage', # Essencial para VPS Linux
+                    '--disable-gpu',           # Economiza CPU na VPS
                     '--disable-blink-features=AutomationControlled',
                     '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
                 ]
 
-                self.context = await self.playwright.chromium.launch_persistent_context(
-                    user_data_dir=self.user_data_dir,
+                # 1. Lança o browser de forma limpa (sem persistência de pasta que trava)
+                self.browser = await self.playwright.chromium.launch(
                     headless=is_linux,
-                    args=launch_args,
-                    viewport={'width': 1280, 'height': 720}
+                    args=launch_args
+                )
+
+                # 2. Cria o contexto usando o storage_state (portabilidade Windows -> Linux)
+                self.context = await self.browser.new_context(
+                    viewport={'width': 1280, 'height': 720},
+                    storage_state=storage_state
                 )
                 
-                # Se houver um estado universal salvo (JSON), injeta os cookies manualmente
-                if storage_state:
-                    try:
-                        import json
-                        with open(state_path, 'r') as f:
-                            state_data = json.load(f)
-                            await self.context.add_cookies(state_data.get('cookies', []))
-                        logger.info("🍪 Cookies injetados com sucesso via storage_state.json!")
-                    except Exception as e:
-                        logger.error(f"Erro ao injetar cookies: {e}")
-
-                self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
-                
+                self.page = await self.context.new_page()
                 await self.page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
 
                 self.is_running = True
@@ -79,9 +75,9 @@ class SessionManager:
 
                 await self.login()
                 
-                # Salva o estado após o login para garantir que temos os cookies novos
+                # 3. Salva/Atualiza o estado para a próxima vez
                 await self.context.storage_state(path=state_path)
-                logger.info("✅ Sessão sincronizada em storage_state.json")
+                logger.info("✅ Sessão sincronizada e salva com sucesso.")
                 
             except Exception as e:
                 logger.critical(f"Erro ao iniciar SessionManager: {e}")
