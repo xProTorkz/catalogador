@@ -1,43 +1,8 @@
 import os
 import sys
-import shutil
-import logging
-
-# 1. FAXINA ATÔMICA (Janitor) - Executa antes de tudo
-def nuke_legacy():
-    # Caminho da raiz da aplicação na VPS
-    root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    
-    # Itens PERMITIDOS (O que for diferente disso será apagado)
-    allowed = ['backend', 'frontend', 'logs', '.env', 'squarecloud.app', 'squarecloud.ignore', 'requirements.txt', '.git']
-    
-    print("--- [SQUARECLOUD] INICIANDO FAXINA DE ARQUIVOS LEGADOS ---")
-    try:
-        for item in os.listdir(root):
-            item_path = os.path.join(root, item)
-            if item not in allowed:
-                if os.path.isdir(item_path):
-                    shutil.rmtree(item_path)
-                else:
-                    os.remove(item_path)
-                print(f"RESRESET: Removido lixo antigo -> {item}")
-        
-        # Limpeza interna da pasta backend (remover antiga pasta 'app' se existir lá dentro)
-        backend_app = os.path.join(root, "backend", "app")
-        if os.path.exists(backend_app):
-            shutil.rmtree(backend_app)
-            print("RESET: Removida subpasta legada backend/app")
-            
-    except Exception as e:
-        print(f"RESET: Erro durante a limpeza: {e}")
-    print("--- [SQUARECLOUD] FAXINA CONCLUÍDA. INICIANDO SISTEMA NOVO ---")
-
-# Executa a limpeza apenas no Linux (SaaS)
-if sys.platform != 'win32':
-    nuke_legacy()
-
-# 2. INÍCIO DO SISTEMA NOVO
 import asyncio
+import logging
+from contextlib import asynccontextmanager
 
 # MANDATORY: This MUST be the first thing executed
 if sys.platform == 'win32':
@@ -49,14 +14,13 @@ if sys.platform == 'win32':
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
+from fastapi.staticfiles import StaticFiles
 
 from backend import config
 from backend import database
 from backend.rotas import api
 from backend.integrations.session_manager import SessionManager
 from backend.integrations.game_runner import GameRunner
-from fastapi.staticfiles import StaticFiles
 
 # Configure Logging
 logging.basicConfig(
@@ -73,8 +37,8 @@ async def lifespan(app: FastAPI):
     
     if sys.platform != 'win32':
         logger.info("SaaS Linux: Garantindo dependências do Playwright...")
+        # Instala apenas os browsers se necessário
         os.system("playwright install chromium")
-        os.system("playwright install-deps")
 
     database.init_db()
     
