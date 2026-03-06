@@ -32,6 +32,11 @@ async def get_rodadas(limit: int = Query(120)):
     # Agora usamos a função de sincronização profissional
     res = database.get_synchronized_history(limit)
     
+    with database.get_db() as conn:
+        total_in_db = conn.execute("SELECT COUNT(*) FROM rounds").fetchone()[0]
+    
+    logger.info(f"API: Enviando {len(res) if res else 0} rodadas. Total no Banco: {total_in_db}")
+    
     if res:
         for r in res:
             r['result'] = str(r['resultado']).upper()

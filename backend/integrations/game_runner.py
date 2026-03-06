@@ -37,6 +37,7 @@ class GameRunner:
         page.on("websocket", self._on_websocket)
 
     def _on_websocket(self, ws: WebSocket):
+        logger.info(f" [WS DETECTADO] URL: {ws.url[:100]}...")
         if "/bacbo/player/game/" in ws.url or "bacbo" in ws.url or "egcvi.com" in ws.url:
             self.ws_found = True
             logger.info(f" [ALVO CONECTADO] {ws.url[:60]}...")
