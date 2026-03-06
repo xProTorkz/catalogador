@@ -48,14 +48,12 @@ async def process_game_data(raw_data: dict):
             was_inserted = database.insert_round(clean_data)
             
             if not was_inserted:
-                grid_logger.debug(f"MOTOR: [DUPLICADO] Round {round_id} já processado.")
                 return
             
-            grid_logger.debug(f"MOTOR: [OK] Round {round_id} salvo e sincronizado.")
+            grid_logger.info(f"💾 [DATABASE] Rodada {round_id} salva com sucesso.")
 
             # ETAPA 6 – Inteligência
             stats = intelligence.calculate_stats(clean_data)
-            grid_logger.debug(f"MOTOR: [STATS] Inteligência atualizada.")
 
         except Exception as e:
             error_logger.error(f"MOTOR: Erro crítico no pipeline: {str(e)}", exc_info=True)
