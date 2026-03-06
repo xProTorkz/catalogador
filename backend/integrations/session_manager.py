@@ -123,6 +123,8 @@ class SessionManager:
         if self.page:
             return await self.page.screenshot(type='jpeg', quality=50)
         return None
+
+    async def _anti_pause_loop(self):
         """Simula atividade humana real e movimentos randômicos."""
         logger.info("Anti-Pause Humanizado Ativado.")
         while self.is_running:
