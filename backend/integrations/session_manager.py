@@ -90,15 +90,39 @@ class SessionManager:
 
     async def login(self):
         if not self.page: return
-        logger.info(f"Acessando mesa: {config.EVO_URL}")
+        logger.info(f"Acessando cassino: {config.EVO_URL}")
         try:
-            await self.page.goto(config.EVO_URL, timeout=90000, wait_until="commit")
+            await self.page.goto(config.EVO_URL, timeout=90000, wait_until="networkidle")
             await asyncio.sleep(5)
+            
+            # Tenta realizar login se encontrar campos
+            try:
+                # Seletores comuns para o site informado
+                user_input = self.page.locator('input[type="text"], input[placeholder*="CPF"], input[placeholder*="Usuário"]').first
+                pass_input = self.page.locator('input[type="password"]').first
+                login_btn = self.page.locator('button:has-text("Entrar"), button:has-text("Login"), .login-button').first
+
+                if await user_input.is_visible(timeout=5000):
+                    logger.info("Tela de login detectada. Inserindo credenciais...")
+                    await user_input.fill(config.EVO_LOGIN)
+                    await pass_input.fill(config.EVO_PASSWORD)
+                    await login_btn.click()
+                    logger.info("Botão de login clicado. Aguardando carregamento do jogo...")
+                    await self.page.wait_for_load_state("networkidle")
+                    await asyncio.sleep(10)
+            except Exception as e:
+                logger.info(f"Login não necessário ou campos não encontrados: {e}")
+
             self.update_activity()
+            logger.info("Sessão inicializada. Monitorando rede...")
         except Exception as e:
             logger.error(f"Erro ao carregar mesa: {e}")
 
-    async def _anti_pause_loop(self):
+    async def get_screenshot(self):
+        """Captura a tela atual para depuração visual na VPS."""
+        if self.page:
+            return await self.page.screenshot(type='jpeg', quality=50)
+        return None
         """Simula atividade humana real e movimentos randômicos."""
         logger.info("Anti-Pause Humanizado Ativado.")
         while self.is_running:

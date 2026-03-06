@@ -131,6 +131,17 @@ async def get_beadplate(limit_cols: int = 16):
         error_logger.error(f"API: Erro ao gerar beadplate: {str(e)}", exc_info=True)
         return []
 
+from fastapi import APIRouter, Query, Response
+
+@router.get("/debug/screenshot")
+async def debug_screenshot():
+    """Retorna uma imagem do que o robô está vendo agora na VPS."""
+    session = SessionManager.get_instance()
+    img = await session.get_screenshot()
+    if img:
+        return Response(content=img, media_type="image/jpeg")
+    return {"error": "Não foi possível capturar a tela."}
+
 @router.post("/set_ws")
 async def set_ws(data: dict):
     url = data.get("url")
