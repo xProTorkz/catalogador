@@ -1,0 +1,25 @@
+# Local Files (Keep on PC, Remove from Git)
+START_ALL.bat
+setup.bat
+run_backend.bat
+.agent/
+logs/
+backend/database.db
+backend/user_data/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Node
+node_modules/
+dist/
+frontend/dist/
+.eslintcache
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
