@@ -86,51 +86,65 @@ class SessionManager:
     async def login(self):
         if not self.page: return
         
-        # 1. Vai para a Home para estabelecer a sessão e carregar os campos de login
         home_url = "https://cassino.bet.br"
         logger.info(f"Iniciando fluxo de login sequencial em: {home_url}")
         
         try:
             await self.page.goto(home_url, timeout=90000, wait_until="load")
-            await asyncio.sleep(5)
+            await asyncio.sleep(8)
 
-            # 2. Tenta detectar se já está logado (procurando botão de 'Sair' ou 'Perfil')
-            logout_btn = self.page.locator('button:has-text("Sair"), .logout, .user-profile').first
-            if await logout_btn.is_visible(timeout=3000):
+            # 1. Espera mais pela sessão ativa (VPS é lenta)
+            logout_btn = self.page.locator('button:has-text("Sair"), .logout, .user-profile, a[href*="logout"]').first
+            if await logout_btn.is_visible(timeout=8000):
                 logger.info("✅ Sessão já ativa na Home. Pulando login...")
             else:
-                # 3. Realiza o login na página principal
-                logger.info("Realizando login manual na Home...")
-                # Seletores comuns para cassino.bet.br
-                user_input = self.page.locator('input[type="text"], input[name="username"], input[placeholder*="Usuário"]').first
+                logger.info("Sessão não detectada. Tentando abrir modal de login...")
+                
+                # 2. Procura e clica no botão que abre o login (se necessário)
+                btn_abrir_login = self.page.locator('button:has-text("Entrar"), button:has-text("Login"), .login-btn, .btn-login').first
+                if await btn_abrir_login.is_visible(timeout=5000):
+                    await btn_abrir_login.click()
+                    await asyncio.sleep(3)
+                
+                # 3. Agora preenche os campos com mais tolerância
+                logger.info("Preenchendo credenciais...")
+                user_input = self.page.locator('input[type="text"], input[name="username"], input[placeholder*="Usuário"], input[placeholder*="CPF"]').first
                 pass_input = self.page.locator('input[type="password"], input[name="password"]').first
-                submit_btn = self.page.locator('button[type="submit"], button:has-text("Entrar"), .login-button').first
+                submit_btn = self.page.locator('button[type="submit"], .modal-content button:has-text("Entrar"), #login-btn').first
 
-                if await user_input.is_visible(timeout=10000):
-                    await user_input.fill(config.EVO_LOGIN)
-                    await pass_input.fill(config.EVO_PASSWORD)
-                    await submit_btn.click()
-                    logger.info("Botão de login clicado. Aguardando autenticação...")
-                    await self.page.wait_for_load_state("networkidle", timeout=30000)
-                    await asyncio.sleep(5)
-                else:
-                    logger.warning("⚠️ Campos de login não encontrados na Home. Tentando seguir direto...")
+                # Espera o campo de usuário aparecer (modal pode demorar)
+                await user_input.wait_for(state="visible", timeout=15000)
+                await user_input.fill(config.EVO_LOGIN)
+                await pass_input.fill(config.EVO_PASSWORD)
+                await submit_btn.click()
+                
+                logger.info("Login enviado. Aguardando processamento...")
+                await self.page.wait_for_load_state("networkidle", timeout=30000)
+                await asyncio.sleep(5)
 
-            # 4. Agora sim, navega para a mesa do Bac Bo
+            # 4. Navega para a mesa
             logger.info(f"Navegando para a mesa: {config.EVO_URL}")
             await self.page.goto(config.EVO_URL, timeout=90000, wait_until="load")
-            await asyncio.sleep(15) # Tempo para o Iframe da Evolution carregar
+            await asyncio.sleep(15)
 
-            # 5. Verifica se o jogo carregou (busca por canvas ou iframes da Evolution)
-            game_loaded = await self.page.locator('canvas, iframe[src*="evolution"], .evolution-game-ui').count() > 0
-            if game_loaded:
-                logger.info("🚀 SUCESSO: Jogo carregado e pronto para captura!")
+            # Verifica sucesso
+            if await self.page.locator('canvas, iframe[src*="evolution"]').count() > 0:
+                logger.info("🚀 SUCESSO: Jogo carregado!")
             else:
-                logger.warning("⚠️ Jogo não detectado após login. Verifique o print em logs/debug_view.jpg")
+                logger.warning("⚠️ Jogo não detectado. Tirando print de erro...")
+                shot = await self.get_screenshot()
+                if shot:
+                    with open("logs/erro_login.jpg", "wb") as f: f.write(shot)
 
             self.update_activity()
         except Exception as e:
-            logger.error(f"Erro no fluxo de login sequencial: {e}")
+            logger.error(f"Erro no fluxo de login: {e}")
+            # Tira print do erro para diagnóstico
+            try:
+                shot = await self.get_screenshot()
+                if shot:
+                    with open("logs/erro_fatal_login.jpg", "wb") as f: f.write(shot)
+            except: pass
 
     async def get_screenshot(self):
         if self.page:
