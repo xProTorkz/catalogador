@@ -91,45 +91,51 @@ class SessionManager:
         if not self.page: return
         logger.info(f"Navegando para: {config.EVO_URL}")
         try:
-            await self.page.goto(config.EVO_URL, timeout=120000, wait_until="networkidle")
-            await asyncio.sleep(10)
+            # Mudança: 'load' em vez de 'networkidle' para evitar travar em sites pesados
+            await self.page.goto(config.EVO_URL, timeout=120000, wait_until="load")
+            await asyncio.sleep(15) # Tempo extra para o JavaScript do cassino rodar
             
-            # Tenta encontrar campos de login na página principal e em todos os IFrames
-            found_login = False
             all_frames = self.page.frames
-            logger.info(f"Verificando login em {len(all_frames)} frames...")
+            logger.info(f"Analisando estrutura de frames ({len(all_frames)} encontrados):")
+            for i, f in enumerate(all_frames):
+                logger.info(f"  Frame {i}: {f.url[:80]}...")
 
+            # Tenta encontrar campos de login ou botões de "Jogar"
+            found_action = False
             for frame in all_frames:
                 try:
+                    # 1. Busca campos de login
                     user_field = frame.locator('input[type="text"], input[placeholder*="CPF"], input[placeholder*="Usuário"], input[name*="username"]').first
-                    pass_field = frame.locator('input[type="password"]').first
-                    btn = frame.locator('button:has-text("Entrar"), button:has-text("Login"), .login-button, button[type="submit"]').first
-
-                    if await user_field.is_visible(timeout=3000):
-                        logger.info(f"Campos de login encontrados no frame: {frame.name or 'principal'}. Autenticando...")
+                    if await user_field.is_visible(timeout=2000):
+                        logger.info(f"🚨 Tela de Login detectada em: {frame.url[:50]}")
                         await user_field.fill(config.EVO_LOGIN)
-                        await pass_field.fill(config.EVO_PASSWORD)
-                        await btn.click()
-                        found_login = True
-                        logger.info("Login disparado. Aguardando 20s para carregamento do jogo...")
+                        await frame.locator('input[type="password"]').first.fill(config.EVO_PASSWORD)
+                        await frame.locator('button:has-text("Entrar"), button:has-text("Login"), .login-button').first.click()
+                        found_action = True
                         await asyncio.sleep(20)
+                        break
+                    
+                    # 2. Busca botão de "Jogar" ou "Play" (comum após o login ou em iframes)
+                    play_btn = frame.locator('button:has-text("Jogar"), button:has-text("Play"), .play-button, .launch-game').first
+                    if await play_btn.is_visible(timeout=2000):
+                        logger.info("▶️ Botão 'Jogar' encontrado! Clicando...")
+                        await play_btn.click()
+                        found_action = True
+                        await asyncio.sleep(15)
                         break
                 except:
                     continue
 
-            if not found_login:
-                logger.info("Nenhum campo de login detectado. Verificando se o jogo já está visível...")
-                # Verifica se existe um canvas ou elemento de jogo para confirmar se já está logado
-                game_element = self.page.locator('canvas, .game-view, .evolution-game-ui').first
-                if await game_element.count() > 0:
-                    logger.info("✅ Jogo detectado! Sessão ativa confirmada.")
-                else:
-                    logger.warning("⚠️ Atenção: Nem login nem jogo foram encontrados. Verifique o storage_state.json ou a URL.")
+            # Verificação final de sucesso
+            game_element = self.page.locator('canvas, .game-view, .evolution-game-ui, iframe[src*="evolution"]').first
+            if await game_element.count() > 0 or "bac-bo" in self.page.url.lower():
+                logger.info("✅ SUCESSO: Jogo identificado na tela!")
+            else:
+                logger.warning("⚠️ O jogo ainda não apareceu. Verifique o print em logs/debug_view.jpg")
 
-            logger.info(f"URL Final: {self.page.url}")
             self.update_activity()
         except Exception as e:
-            logger.error(f"Erro no fluxo de login: {e}")
+            logger.error(f"Erro crítico no login: {e}")
 
     async def get_screenshot(self):
         if self.page:
