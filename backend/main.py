@@ -39,9 +39,11 @@ async def lifespan(app: FastAPI):
     logger.info("==========================================")
     
     if sys.platform != 'win32':
-        logger.info("SaaS Linux: Garantindo dependências do Playwright...")
-        # Instala apenas os browsers se necessário
-        os.system("playwright install chromium")
+        logger.info("SaaS Linux: Instalando binários do Chromium...")
+        # Chamada via módulo python para garantir que o PATH não seja problema
+        os.system("python3 -m playwright install chromium")
+        # Força a instalação das dependências do sistema se necessário
+        os.system("python3 -m playwright install-deps chromium")
 
     database.init_db()
     
