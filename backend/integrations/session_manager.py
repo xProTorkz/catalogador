@@ -65,6 +65,10 @@ class SessionManager:
                 )
                 
                 self.page = await self.context.new_page()
+                
+                # DIAGNÓSTICO DE 10 SEGUNDOS: Escuta global de WebSockets
+                self.page.on("websocket", lambda ws: logger.info(f"📡 [WS DETECTADO NA PÁGINA] {ws.url[:120]}"))
+                
                 await self.page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
 
                 self.is_running = True
@@ -90,25 +94,29 @@ class SessionManager:
             # 1. Tenta ir direto para a mesa (Eficiência máxima com storage_state)
             logger.info(f"Tentando acesso direto à mesa: {config.EVO_URL}")
             await self.page.goto(config.EVO_URL, timeout=90000, wait_until="load")
-            await asyncio.sleep(12)
+            await asyncio.sleep(15) # Tempo extra para o Linux processar scripts pesados
 
-            # 2. Verifica se o jogo já carregou ou se há sinais de login ativo
-            # Procuramos por elementos do jogo OU botões de perfil/sair
-            is_logged = await self.page.locator('canvas, iframe[src*="evolution"], .user-profile, .logout, .avatar').count() > 0
+            # 2. SCANNER DE FRAMES: Verifica se a Evolution carregou de verdade
+            frames = self.page.frames
+            frame_urls = [f.url.lower() for f in frames]
+            has_evo = any("evolution" in url or "livecasino" in url or "casinofans" in url for url in frame_urls)
             
-            if is_logged:
-                logger.info("✅ SUCESSO: Sessão ativa detectada! Pulando login manual.")
+            if has_evo:
+                logger.info(f"✅ SUCESSO: Mesa Evolution detectada em {len(frames)} frames!")
                 self.update_activity()
                 return
+            else:
+                logger.warning(f"⚠️ MESA NÃO DETECTADA. Frames atuais: {len(frames)}")
+                for i, f in enumerate(frames): logger.info(f"  > Frame {i}: {f.url[:60]}")
 
-            # 3. Se não detectou login, inicia o fallback via Home
+            # 3. Se não detectou a mesa, tenta o fallback via Home
             home_url = "https://cassino.bet.br"
-            logger.warning("⚠️ Sessão não identificada. Iniciando fallback via Home...")
+            logger.warning("🚨 Mesa não carregou direto. Tentando re-autenticar via Home...")
             await self.page.goto(home_url, timeout=90000, wait_until="load")
-            await asyncio.sleep(8)
+            await asyncio.sleep(10)
 
             # Procura e clica no botão que abre o login (se necessário)
-            btn_abrir_login = self.page.locator('button:has-text("Entrar"), button:has-text("Login"), .login-btn, .btn-login').first
+            btn_abrir_login = self.page.locator('button:has-text("Entrar"), button:has-text("Login"), .login-btn, .btn-login, a:has-text("Entrar")').first
             if await btn_abrir_login.is_visible(timeout=5000):
                 await btn_abrir_login.click()
                 await asyncio.sleep(3)
@@ -119,15 +127,15 @@ class SessionManager:
             pass_input = self.page.locator('input[type="password"], input[name="password"]').first
             submit_btn = self.page.locator('button[type="submit"], .modal-content button:has-text("Entrar"), #login-btn').first
 
-            await user_input.wait_for(state="visible", timeout=10000)
-            await user_input.fill(config.EVO_LOGIN)
-            await pass_input.fill(config.EVO_PASSWORD)
-            await submit_btn.click()
+            if await user_input.is_visible(timeout=10000):
+                await user_input.fill(config.EVO_LOGIN)
+                await pass_input.fill(config.EVO_PASSWORD)
+                await submit_btn.click()
+                logger.info("Login enviado. Aguardando 10s e indo para a mesa...")
+                await asyncio.sleep(10)
             
-            logger.info("Login enviado. Redirecionando para a mesa...")
-            await asyncio.sleep(10)
             await self.page.goto(config.EVO_URL, timeout=90000, wait_until="load")
-            await asyncio.sleep(15)
+            await asyncio.sleep(20)
 
             self.update_activity()
         except Exception as e:
