@@ -18,7 +18,7 @@ class SessionManager:
         self.is_running = False
         self.last_activity_timestamp = 0 
         self.lock = asyncio.Lock()
-        self.user_data_dir = os.path.abspath(os.path.join(os.getcwd(), "backend", "user_data"))
+        self.user_data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "user_data"))
 
     @classmethod
     def get_instance(cls):
@@ -36,13 +36,6 @@ class SessionManager:
                 self.playwright = await async_playwright().start()
                 is_linux = sys.platform != 'win32'
                 
-                state_path = os.path.join(self.user_data_dir, "storage_state.json")
-                # Se não existir o JSON, ele inicia limpo
-                storage_state = state_path if os.path.exists(state_path) else None
-                
-                if storage_state:
-                    logger.info("📦 Estado de login (storage_state.json) encontrado! Carregando sessão...")
-
                 launch_args = [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
@@ -52,22 +45,21 @@ class SessionManager:
                     '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
                 ]
 
-                # 1. Lança o browser de forma limpa (sem persistência de pasta que trava)
-                self.browser = await self.playwright.chromium.launch(
+                # 1. Lança o browser com persistência completa do perfil
+                self.context = await self.playwright.chromium.launch_persistent_context(
+                    self.user_data_dir,
                     headless=is_linux,
-                    args=launch_args
-                )
-
-                # 2. Cria o contexto usando o storage_state (portabilidade Windows -> Linux)
-                self.context = await self.browser.new_context(
-                    viewport={'width': 1280, 'height': 720},
-                    storage_state=storage_state
+                    args=launch_args,
+                    viewport={'width': 1280, 'height': 720}
                 )
                 
                 # ESCUTA GLOBAL: Captura WebSockets em qualquer frame/iframe do contexto
-                self.context.on("websocket", lambda ws: logger.info(f"🔥 [WS GLOBAL DETECTADO] {ws.url[:120]}"))
+                self.context.on("websocket", lambda ws: logger.debug(f"🔥 [WS GLOBAL DETECTADO] {ws.url[:120]}"))
                 
                 self.page = await self.context.new_page()
+                
+                # DIAGNÓSTICO: Registrar WS também na página para redundância em VPS
+                self.page.on("websocket", lambda ws: logger.debug(f"📡 [WS PÁGINA DETECTADO] {ws.url[:120]}"))
                 
                 await self.page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
 
@@ -79,30 +71,32 @@ class SessionManager:
 
                 await self.login()
                 
-                # 3. Salva/Atualiza o estado para a próxima vez
-                await self.context.storage_state(path=state_path)
-                logger.info("✅ Sessão sincronizada e salva com sucesso.")
-                
+                # O launch_persistent_context gerencia o estado automaticamente.
+                logger.info("✅ Sessão sincronizada e salva com sucesso (via persistent context).")
+
             except Exception as e:
                 logger.critical(f"Erro ao iniciar SessionManager: {e}")
                 await self.stop()
 
     async def login(self):
         if not self.page: return
+        # Trava de segurança para não rodar login em loop se já estiver logado
+        if getattr(self, "_login_done", False): return
         
         try:
             # 1. Tenta ir direto para a mesa (Eficiência máxima com storage_state)
             logger.info(f"Tentando acesso direto à mesa: {config.EVO_URL}")
             await self.page.goto(config.EVO_URL, timeout=90000, wait_until="load")
-            await asyncio.sleep(15) # Tempo extra para o Linux processar scripts pesados
+            await asyncio.sleep(15) 
 
-            # 2. SCANNER DE FRAMES: Verifica se a Evolution carregou de verdade
+            # 2. SCANNER DE FRAMES
             frames = self.page.frames
             frame_urls = [f.url.lower() for f in frames]
-            has_evo = any("evolution" in url or "livecasino" in url or "casinofans" in url for url in frame_urls)
+            has_evo = any("evolution" in url or "livecasino" in url or "casinofans" in url or "evo-games" in url for url in frame_urls)
             
             if has_evo:
                 logger.info(f"✅ SUCESSO: Mesa Evolution detectada em {len(frames)} frames!")
+                self._login_done = True
                 self.update_activity()
                 return
             else:
@@ -170,16 +164,33 @@ class SessionManager:
 
     async def _monitor_session_loop(self):
         while self.is_running:
-            await asyncio.sleep(20)
+            await asyncio.sleep(15) # Checagem mais frequente
             if not self.page: continue
-            elapsed = asyncio.get_running_loop().time() - self.last_activity_timestamp
-            if elapsed > 300: # 5 minutos sem dados
-                logger.warning(f"Inatividade detectada ({int(elapsed)}s). Recarregando mesa...")
-                try:
-                    await self.page.reload()
-                    self.update_activity()
+            
+            try:
+                current_url = self.page.url
+                # Se a URL não contém 'bac-bo' ou o link do jogo, fomos expulsos
+                if "bac-bo" not in current_url.lower() and "tournaments" in current_url.lower():
+                    logger.warning(f"🚨 Desvio detectado! Redirecionado para: {current_url}. Forçando volta para a mesa...")
+                    self._login_done = False # Permite re-verificar o sucesso da mesa
+                    await self.page.goto(config.EVO_URL, timeout=60000, wait_until="load")
                     await asyncio.sleep(10)
-                except: pass
+                    await self.login()
+                    continue
+
+                elapsed = asyncio.get_running_loop().time() - self.last_activity_timestamp
+                if elapsed > 180: # 3 minutos sem dados (mais sensível)
+                    logger.warning(f"Inatividade detectada ({int(elapsed)}s). Tentando reativar mesa...")
+                    try:
+                        # Tenta clicar em um ponto neutro antes de dar reload
+                        await self.page.mouse.click(100, 100)
+                        await asyncio.sleep(2)
+                        if elapsed > 300: # Se passar de 5 min, aí sim dá reload
+                            await self.page.reload()
+                            self.update_activity()
+                    except: pass
+            except Exception as e:
+                logger.error(f"Erro no loop de monitoramento: {e}")
 
     def update_activity(self):
         self.last_activity_timestamp = asyncio.get_running_loop().time()

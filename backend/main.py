@@ -62,11 +62,8 @@ app = FastAPI(lifespan=lifespan)
 
 @app.middleware("http")
 async def log_requests(request, call_next):
-    if not request.url.path.startswith("/api"):
-        return await call_next(request)
-    logger.info(f"REQ: {request.method} {request.url.path}")
-    response = await call_next(request)
-    return response
+    # Log removido para evitar spam de 200 OK no terminal
+    return await call_next(request)
 
 app.add_middleware(
     CORSMiddleware,
@@ -86,4 +83,5 @@ if os.path.exists(frontend_path):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("backend.main:app", host=config.HOST, port=config.PORT, reload=False, loop="asyncio")
+    # log_config=None e access_log=False para silenciar os 200 OK
+    uvicorn.run("backend.main:app", host=config.HOST, port=config.PORT, reload=False, loop="asyncio", access_log=False)
