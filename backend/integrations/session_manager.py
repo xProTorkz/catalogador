@@ -36,6 +36,12 @@ class SessionManager:
                 self.playwright = await async_playwright().start()
                 is_linux = sys.platform != 'win32'
                 
+                state_path = os.path.join(self.user_data_dir, "storage_state.json")
+                storage_state = state_path if os.path.exists(state_path) else None
+                
+                if storage_state:
+                    logger.info("📦 Estado de login encontrado! Carregando sessão universal...")
+
                 launch_args = [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
@@ -47,7 +53,8 @@ class SessionManager:
                     user_data_dir=self.user_data_dir,
                     headless=is_linux,
                     args=launch_args,
-                    viewport={'width': 1280, 'height': 720}
+                    viewport={'width': 1280, 'height': 720},
+                    storage_state=storage_state
                 )
                 
                 self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
@@ -61,6 +68,11 @@ class SessionManager:
                 asyncio.create_task(self._monitor_session_loop())
 
                 await self.login()
+                
+                # Salva o estado após o login para garantir que temos os cookies novos
+                await self.context.storage_state(path=state_path)
+                logger.info("✅ Sessão sincronizada em storage_state.json")
+                
             except Exception as e:
                 logger.critical(f"Erro ao iniciar SessionManager: {e}")
                 await self.stop()
