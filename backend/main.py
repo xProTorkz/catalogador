@@ -39,11 +39,9 @@ async def lifespan(app: FastAPI):
     logger.info("==========================================")
     
     if sys.platform != 'win32':
-        logger.info("SaaS Linux: Instalando binários do Chromium...")
-        # Chamada via módulo python para garantir que o PATH não seja problema
+        logger.info("SaaS Linux: Baixando binário do Chromium...")
+        # Baixa o navegador sem tentar instalar bibliotecas do sistema (proibido na Square)
         os.system("python3 -m playwright install chromium")
-        # Força a instalação das dependências do sistema se necessário
-        os.system("python3 -m playwright install-deps chromium")
 
     database.init_db()
     
