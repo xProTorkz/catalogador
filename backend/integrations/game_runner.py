@@ -59,86 +59,80 @@ class GameRunner:
             if not match: return
             data = json.loads(match.group(1))
 
-            msg_type = data.get("type", "")
-            args = data.get("args", {})
+            # TRATAMENTO DE FORMATO (Dicionário ou Lista)
+            msg_type = ""
+            args = {}
+            if isinstance(data, dict):
+                msg_type = data.get("type", "")
+                args = data.get("args", {})
+            elif isinstance(data, list) and len(data) >= 2:
+                msg_type = data[0]
+                args = data[1]
+            
             if isinstance(args, list) and len(args) > 0: args = args[0]
 
-            # 1. Troca de Dealer
-            if "dealer.changed" in msg_type:
-                dealer = args.get("dealer", {}).get("screenName", "Desconhecido")
-                if dealer != self._last_dealer:
-                    logger.info(f"👤 [DEALER] Novo dealer na mesa: {dealer}")
+            # 1. TROCA DE DEALER
+            if "dealer.changed" in msg_type or "dealer" in str(data):
+                dealer = args.get("dealer", {}).get("screenName") if isinstance(args, dict) else None
+                if dealer and dealer != self._last_dealer:
+                    logger.info(f"[DEALER] Novo dealer na mesa: {dealer}")
                     self._last_dealer = dealer
 
-            # 2. Processamento Live (Tempo Real)
-            self._process_live(data)
+            # 2. PROCESSAMENTO LIVE (SHAKING E DADOS)
+            if "playerstate" in msg_type.lower():
+                self._process_live_events(args)
 
-            # 3. Resultado Final
-            if "bacbo.playerState" in msg_type or "bacbo.roundStatus" in msg_type:
-                if args.get("stage") == "Result" or "winner" in args:
+            # 3. RESULTADO FINAL
+            if "bacbo.playerState" in msg_type or "bacbo.roundStatus" in msg_type or "gameResult" in msg_type:
+                if isinstance(args, dict) and (args.get("stage") == "Result" or "winner" in args):
                     self._process_final(args)
                     return
 
+            # 4. HISTÓRICO INICIAL
             if "bacbo.road" in msg_type:
                 history = args.get("history", [])
-                for entry in history: self._process_final(entry)
+                for entry in history: self._process_final(entry, is_history=True)
                 return
 
         except Exception as e:
-            pass # Silencia erros de parsing irrelevantes
+            logger.debug(f"Erro no parsing: {e}")
 
-    def _process_live(self, data):
+    def _process_live_events(self, args):
         try:
-            target = data
-            if isinstance(data, list) and len(data) > 1: target = data[1]
-            if not isinstance(target, dict): return
+            if not isinstance(args, dict): return
+            stage = args.get("stage", "Wait")
+            dice = args.get("dice", {})
+            p1, p2, b1, b2 = dice.get("p1", 0), dice.get("p2", 0), dice.get("b1", 0), dice.get("b2", 0)
             
-            ev_type = str(target.get("type", "")).lower()
-            args = target.get("args", {})
-            if isinstance(args, list) and len(args) > 0: args = args[0]
+            # MUDANÇA DE FASE
+            if stage != self._last_stage:
+                if stage == "Shaking":
+                    logger.info("[SHAKING] Dados sendo chacoalhados")
+                elif stage == "Wait":
+                    logger.info("[STATUS] Aguardando próxima rodada")
+                elif stage == "NewRound":
+                    logger.info("[MESA] Nova rodada iniciada")
+                self._last_stage = stage
 
-            if "playerstate" in ev_type:
-                stage = args.get("stage", "Wait")
-                dice = args.get("dice", {})
-                p1, p2, b1, b2 = dice.get("p1", 0), dice.get("p2", 0), dice.get("b1", 0), dice.get("b2", 0)
-                
-                # MUDANÇA DE FASE
-                if stage != self._last_stage:
-                    if stage == "Shaking":
-                        logger.info("🔥 [MESA] Dados sendo chacoalhados...")
-                    elif stage == "Wait":
-                        logger.info("⏳ [MESA] Aguardando próxima rodada...")
-                    elif stage == "Result":
-                        logger.info("✨ [MESA] Processando resultado...")
-                    self._last_stage = stage
+            # REVELAÇÃO DE DADOS
+            current_dice = {"p1": p1, "p2": p2, "b1": b1, "b2": b2}
+            if current_dice != self._last_dice:
+                if p1 > 0 and self._last_dice["p1"] == 0: logger.info(f"[DICE] Player Dado 1: {p1}")
+                if p2 > 0 and self._last_dice["p2"] == 0: logger.info(f"[DICE] Player Dado 2: {p2}")
+                if b1 > 0 and self._last_dice["b1"] == 0: logger.info(f"[DICE] Banker Dado 1: {b1}")
+                if b2 > 0 and self._last_dice["b2"] == 0: logger.info(f"[DICE] Banker Dado 2: {b2}")
+                self._last_dice = current_dice
 
-                # REVELAÇÃO DE DADOS E SCORE PARCIAL
-                current_dice = {"p1": p1, "p2": p2, "b1": b1, "b2": b2}
-                if current_dice != self._last_dice:
-                    revealed = []
-                    if p1 > 0 and self._last_dice["p1"] == 0: revealed.append(f"P1:{p1}")
-                    if p2 > 0 and self._last_dice["p2"] == 0: revealed.append(f"P2:{p2}")
-                    if b1 > 0 and self._last_dice["b1"] == 0: revealed.append(f"B1:{b1}")
-                    if b2 > 0 and self._last_dice["b2"] == 0: revealed.append(f"B2:{b2}")
-                    
-                    if revealed:
-                        p_score = args.get("playerScore", 0)
-                        b_score = args.get("bankerScore", 0)
-                        logger.info(f"🎲 [DICE] {' | '.join(revealed)} ➔ Placar: P {p_score} x {b_score} B")
-                    
-                    self._last_dice = current_dice
-
-                # Atualiza State para o Front
-                live = LiveState.get_instance()
-                live.update_general(
-                    stage=stage,
-                    round_id=str(args.get("id", args.get("gameId", "---"))),
-                    player={"score": args.get("playerScore", 0), "dice": [p1, p2], "bets": 0},
-                    banker={"score": args.get("bankerScore", 0), "dice": [b1, b2], "bets": 0}
-                )
+            # Atualiza State Global
+            LiveState.get_instance().update_general(
+                stage=stage,
+                round_id=str(args.get("id", "---")),
+                player={"score": args.get("playerScore", 0), "dice": [p1, p2], "bets": 0},
+                banker={"score": args.get("bankerScore", 0), "dice": [b1, b2], "bets": 0}
+            )
         except: pass
 
-    def _process_final(self, target):
+    def _process_final(self, target, is_history=False):
         try:
             rid = target.get("roundId") or target.get("gameId") or target.get("id")
             winner = target.get("winner") or target.get("result")
@@ -147,32 +141,21 @@ class GameRunner:
                 rid_str = str(rid)
                 if rid_str in self.processed_rounds: return
                 self.processed_rounds.add(rid_str)
-                if len(self.processed_rounds) > 200: 
-                    self.processed_rounds.remove(next(iter(self.processed_rounds)))
-
-                dice_obj = target.get("dice", {})
-                if isinstance(dice_obj, dict):
-                    p1, p2, b1, b2 = dice_obj.get("p1", 0), dice_obj.get("p2", 0), dice_obj.get("b1", 0), dice_obj.get("b2", 0)
-                elif isinstance(dice_obj, list) and len(dice_obj) >= 4:
-                    p1, p2, b1, b2 = dice_obj[0].get("value", 0), dice_obj[1].get("value", 0), dice_obj[2].get("value", 0), dice_obj[3].get("value", 0)
-                else:
-                    p1, p2 = target.get("p1", 0), target.get("p2", 0)
-                    b1, b2 = target.get("b1", 0), target.get("b2", 0)
+                if len(self.processed_rounds) > 200: self.processed_rounds.pop()
 
                 p_score = target.get("playerScore", 0)
                 b_score = target.get("bankerScore", 0)
                 
-                win_icon = "🔵 PLAYER" if winner.lower() == 'player' else "🔴 BANKER" if winner.lower() == 'banker' else "🟡 TIE"
-                logger.info(f"🏆 [RESULTADO] {win_icon} venceu ({p_score} x {b_score})")
+                # SÓ LOGA RESULTADO SE NÃO FOR HISTÓRICO (para não poluir o boot)
+                if not is_history:
+                    logger.info(f"[RESULT] {winner.upper()} venceu ({p_score} x {b_score})")
                 
                 parsed = {
                     "round_id": rid_str, "resultado": str(winner).lower(),
                     "p_score": p_score, "b_score": b_score,
-                    "p_card1": p1, "p_card2": p2, "b_card1": b1, "b_card2": b2,
-                    "source": "bacbo_evo"
+                    "source": "bacbo_evo", "raw_data": target
                 }
                 
                 self._last_dice = {"p1": 0, "p2": 0, "b1": 0, "b2": 0}
                 asyncio.create_task(catalogador.process_game_data(parsed))
-        except Exception as e:
-            pass
+        except: pass

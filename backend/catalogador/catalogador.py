@@ -50,7 +50,7 @@ async def process_game_data(raw_data: dict):
             if not was_inserted:
                 return
             
-            grid_logger.info(f"💾 [DATABASE] Rodada {round_id} salva com sucesso.")
+            grid_logger.info(f"[DATABASE] Rodada {round_id} salva com sucesso")
 
             # ETAPA 6 – Inteligência
             stats = intelligence.calculate_stats(clean_data)
